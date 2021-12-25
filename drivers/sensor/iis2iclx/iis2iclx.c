@@ -193,6 +193,66 @@ static int iis2iclx_attr_set(const struct device *dev,
 	return 0;
 }
 
+static int iis2iclx_accel_range_get(const struct device *dev, struct sensor_value *val)
+{
+	const struct iis2iclx_config *cfg = dev->config;
+	struct iis2iclx_data *data = dev->data;
+
+	iis2iclx_fs_xl_t val_raw;
+
+	if (iis2iclx_xl_full_scale_get((stmdev_ctx_t *)&cfg->ctx, &val_raw) < 0) {
+		LOG_ERR("failed to get accelerometer range");
+		return -EIO;
+	}
+
+	struct sensor_value ms2;
+	sensor_g_to_ms2((int32_t)iis2iclx_accel_fs_map[val_raw], &ms2);
+
+	val->val1 = ms2.val1;
+	val->val2 = ms2.val2;
+
+	return 0;
+}
+
+static int iis2iclx_accel_odr_get(const struct device *dev, struct sensor_value *val)
+{
+	const struct iis2iclx_config *cfg = dev->config;
+	struct iis2iclx_data *data = dev->data;
+
+	iis2iclx_odr_xl_t val_raw = IIS2ICLX_XL_ODR_OFF;
+
+	if (iis2iclx_xl_data_rate_get((stmdev_ctx_t *)&cfg->ctx, &val_raw) < 0) {
+		LOG_ERR("failed to get accelerometer ODR");
+		return -EIO;
+	}
+
+	val->val1 = (int32_t)val_raw;
+	return 0;
+}
+
+static int iis2iclx_attr_get(const struct device *dev,
+			     enum sensor_channel chan,
+			     enum sensor_attribute attr,
+			     struct sensor_value *val)
+{
+	if (SENSOR_CHAN_ACCEL_XYZ != chan) {
+		LOG_ERR("attr_get() not supported on this channel.");
+		return -ENOTSUP;
+	}
+
+	switch (attr) {
+	case SENSOR_ATTR_FULL_SCALE:
+		return iis2iclx_accel_range_get(dev, val);
+	case SENSOR_ATTR_SAMPLING_FREQUENCY:
+		return iis2iclx_accel_odr_get(dev, val);
+	default:
+		LOG_ERR("attr_get() not supported for this attr.");
+		return -ENOTSUP;
+	}
+
+	return 0;
+}
+
 static int iis2iclx_sample_fetch_accel(const struct device *dev)
 {
 	const struct iis2iclx_config *cfg = dev->config;
@@ -521,6 +581,7 @@ static int iis2iclx_channel_get(const struct device *dev,
 
 static const struct sensor_driver_api iis2iclx_driver_api = {
 	.attr_set = iis2iclx_attr_set,
+	.attr_get = iis2iclx_attr_get,
 #if CONFIG_IIS2ICLX_TRIGGER
 	.trigger_set = iis2iclx_trigger_set,
 #endif
