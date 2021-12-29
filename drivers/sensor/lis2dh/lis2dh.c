@@ -271,6 +271,87 @@ static int lis2dh_acc_range_set(const struct device *dev, int32_t range)
 }
 #endif
 
+static int lis2dh_get_reg(
+	const struct device *dev,
+	enum sensor_channel chan,
+	enum sensor_attribute attr,
+	struct sensor_value *val)
+{
+	struct lis2dh_data *lis2dh = dev->data;
+	uint8_t reg = 0;
+	uint8_t reg_val = 0;
+	int err = 0;
+	struct sensor_value ms2;
+	switch (attr) {
+#ifdef CONFIG_LIS2DH_ACCEL_RANGE_RUNTIME
+	case SENSOR_ATTR_FULL_SCALE:
+		reg = LIS2DH_REG_CTRL4;
+		err = lis2dh->hw_tf->read_reg(dev, reg, &reg_val);
+		uint16_t range_mg = 2 * (1 << ((LIS2DH_FS_MASK & reg_val) >>
+					      LIS2DH_FS_SHIFT));
+		LOG_DBG("%s >> reg raw %u, range G: %u",
+			__func__,
+			reg_val,
+			range_mg);
+		sensor_g_to_ms2(range_mg, &ms2);
+		val->val1 = ms2.val1;
+		val->val2 = ms2.val2;
+		break;
+#endif
+#ifdef CONFIG_LIS2DH_ODR_RUNTIME
+	case SENSOR_ATTR_SAMPLING_FREQUENCY:
+		reg = LIS2DH_REG_CTRL1;
+		err = lis2dh->hw_tf->read_reg(dev, reg, &reg_val);
+		uint16_t odr = lis2dh_odr_map[reg_val >> LIS2DH_ODR_SHIFT];
+		LOG_DBG("%s >> reg raw %u, ODR: %u", __func__, reg_val, odr);
+		val->val1 = odr;
+		val->val2 = 0;
+		break;
+#endif
+#if defined(CONFIG_LIS2DH_TRIGGER)
+	case SENSOR_ATTR_SLOPE_TH:
+		reg = LIS2DH_REG_INT2_THS;
+		err = lis2dh->hw_tf->read_reg(dev, reg, &reg_val);
+		LOG_DBG("%s >> reg raw %u, THS: %u", __func__, reg_val, reg_val);
+		val->val1 = reg_val;
+		val->val2 = 0;
+		break;
+	case SENSOR_ATTR_SLOPE_DUR:
+		reg = LIS2DH_REG_INT2_DUR;
+		err = lis2dh->hw_tf->read_reg(dev, reg, &reg_val);
+		LOG_DBG("%s >> reg raw %u, DUR: %u", __func__, reg_val, reg_val);
+		val->val1 = reg_val;
+		val->val2 = 0;
+		break;
+#endif
+	default:
+		LOG_DBG("Accel attribute not supported.");
+		return -ENOTSUP;
+	}
+
+	return err;
+}
+
+static int lis2dh_attr_get(
+	const struct device *dev,
+	enum sensor_channel chan,
+	enum sensor_attribute attr,
+	struct sensor_value *val)
+{
+	switch (chan) {
+	case SENSOR_CHAN_ACCEL_X:
+	case SENSOR_CHAN_ACCEL_Y:
+	case SENSOR_CHAN_ACCEL_Z:
+	case SENSOR_CHAN_ACCEL_XYZ:
+		return lis2dh_get_reg(dev, chan, attr, val);
+	default:
+		LOG_WRN("attr_get() not supported on this channel.");
+		return -ENOTSUP;
+	}
+
+	return 0;
+}
+
 static int lis2dh_acc_config(const struct device *dev,
 			     enum sensor_channel chan,
 			     enum sensor_attribute attr,
@@ -318,6 +399,7 @@ static int lis2dh_attr_set(const struct device *dev, enum sensor_channel chan,
 
 static const struct sensor_driver_api lis2dh_driver_api = {
 	.attr_set = lis2dh_attr_set,
+	.attr_get = lis2dh_attr_get,
 #if CONFIG_LIS2DH_TRIGGER
 	.trigger_set = lis2dh_trigger_set,
 #endif
