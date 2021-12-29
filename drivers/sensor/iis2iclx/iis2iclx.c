@@ -196,7 +196,6 @@ static int iis2iclx_attr_set(const struct device *dev,
 static int iis2iclx_accel_range_get(const struct device *dev, struct sensor_value *val)
 {
 	const struct iis2iclx_config *cfg = dev->config;
-	struct iis2iclx_data *data = dev->data;
 
 	iis2iclx_fs_xl_t val_raw;
 
@@ -217,7 +216,6 @@ static int iis2iclx_accel_range_get(const struct device *dev, struct sensor_valu
 static int iis2iclx_accel_odr_get(const struct device *dev, struct sensor_value *val)
 {
 	const struct iis2iclx_config *cfg = dev->config;
-	struct iis2iclx_data *data = dev->data;
 
 	iis2iclx_odr_xl_t val_raw = IIS2ICLX_XL_ODR_OFF;
 
