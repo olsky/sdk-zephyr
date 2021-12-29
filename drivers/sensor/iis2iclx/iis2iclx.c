@@ -226,7 +226,8 @@ static int iis2iclx_accel_odr_get(const struct device *dev, struct sensor_value 
 		return -EIO;
 	}
 
-	val->val1 = (int32_t)val_raw;
+	val->val1 = iis2iclx_odr_map[val_raw];
+	val->val2 = 0;
 	return 0;
 }
 
