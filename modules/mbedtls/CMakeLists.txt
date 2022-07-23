@@ -7,7 +7,7 @@ if(CONFIG_MBEDTLS_BUILTIN)
 	)
 
   target_include_directories(mbedTLS INTERFACE
-    ${ZEPHYR_CURRENT_MODULE_DIR}/mbedtls/include
+    ${ZEPHYR_CURRENT_MODULE_DIR}/include
     configs
 	)
 
@@ -15,7 +15,7 @@ if(CONFIG_MBEDTLS_BUILTIN)
 
   file(GLOB
     mbedtls_sources # This is an output parameter
-      ${ZEPHYR_CURRENT_MODULE_DIR}/mbedtls/library/*.c
+      ${ZEPHYR_CURRENT_MODULE_DIR}/library/*.c
     )
 
   zephyr_library_sources(
@@ -54,7 +54,8 @@ elseif (CONFIG_MBEDTLS_LIBRARY)
   # after mbedtls_external on the linkers command line.
 else()
   # If none of either CONFIG_MBEDTLS_BUILTIN or CONFIG_MBEDTLS_LIBRARY
-  # are defined the users need to manually add the mbedtls library and
+  # are defined the users need add a custom Kconfig choice to the
+  # MBEDTLS_IMPLEMENTATION and manually add the mbedtls library and
   # included the required directories for mbedtls in their projects.
 endif()
 

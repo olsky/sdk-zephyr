@@ -7,25 +7,26 @@
 #include <zephyr/types.h>
 #include <stddef.h>
 #include <errno.h>
-#include <zephyr.h>
-#include <sys/printk.h>
+#include <zephyr/zephyr.h>
+#include <zephyr/sys/printk.h>
 
-#include <bluetooth/bluetooth.h>
-#include <bluetooth/hci.h>
-#include <bluetooth/conn.h>
-#include <bluetooth/uuid.h>
-#include <bluetooth/gatt.h>
-#include <bluetooth/iso.h>
-#include <sys/byteorder.h>
-
-#define MAX_ISO_APP_DATA (CONFIG_BT_ISO_TX_MTU - BT_ISO_CHAN_SEND_RESERVE)
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/hci.h>
+#include <zephyr/bluetooth/conn.h>
+#include <zephyr/bluetooth/uuid.h>
+#include <zephyr/bluetooth/gatt.h>
+#include <zephyr/bluetooth/iso.h>
+#include <zephyr/sys/byteorder.h>
 
 static void start_scan(void);
 
 static struct bt_conn *default_conn;
 static struct k_work_delayable iso_send_work;
 static struct bt_iso_chan iso_chan;
-NET_BUF_POOL_FIXED_DEFINE(tx_pool, 1, CONFIG_BT_ISO_TX_MTU, NULL);
+static uint32_t seq_num;
+static uint32_t interval_us = 10U * USEC_PER_MSEC; /* 10 ms */
+NET_BUF_POOL_FIXED_DEFINE(tx_pool, 1, BT_ISO_SDU_BUF_SIZE(CONFIG_BT_ISO_TX_MTU), 8,
+			  NULL);
 
 /**
  * @brief Send ISO data on timeout
@@ -43,7 +44,7 @@ NET_BUF_POOL_FIXED_DEFINE(tx_pool, 1, CONFIG_BT_ISO_TX_MTU, NULL);
 static void iso_timer_timeout(struct k_work *work)
 {
 	int ret;
-	static uint8_t buf_data[MAX_ISO_APP_DATA];
+	static uint8_t buf_data[CONFIG_BT_ISO_TX_MTU];
 	static bool data_initialized;
 	struct net_buf *buf;
 	static size_t len_to_send = 1;
@@ -61,13 +62,13 @@ static void iso_timer_timeout(struct k_work *work)
 
 	net_buf_add_mem(buf, buf_data, len_to_send);
 
-	ret = bt_iso_chan_send(&iso_chan, buf);
+	ret = bt_iso_chan_send(&iso_chan, buf, seq_num++, BT_ISO_TIMESTAMP_NONE);
 
 	if (ret < 0) {
 		printk("Failed to send ISO data (%d)\n", ret);
 	}
 
-	k_work_schedule(&iso_send_work, K_MSEC(1000));
+	k_work_schedule(&iso_send_work, K_USEC(interval_us));
 
 	len_to_send++;
 	if (len_to_send > ARRAY_SIZE(buf_data)) {
@@ -128,6 +129,8 @@ static void start_scan(void)
 static void iso_connected(struct bt_iso_chan *chan)
 {
 	printk("ISO Channel %p connected\n", chan);
+
+	seq_num = 0U;
 
 	/* Start send timer */
 	k_work_schedule(&iso_send_work, K_MSEC(0));
@@ -217,8 +220,8 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 void main(void)
 {
 	int err;
-	static struct bt_iso_chan *channels[1];
-	struct bt_iso_cig_create_param param;
+	struct bt_iso_chan *channels[1];
+	struct bt_iso_cig_param param;
 	struct bt_iso_cig *cig;
 
 	err = bt_enable(NULL);
@@ -239,7 +242,7 @@ void main(void)
 	param.packing = 0;
 	param.framing = 0;
 	param.latency = 10; /* ms */
-	param.interval = 10 * USEC_PER_MSEC; /* us */
+	param.interval = interval_us; /* us */
 
 	err = bt_iso_cig_create(&param, &cig);
 

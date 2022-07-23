@@ -89,6 +89,7 @@ beacon	Compass Electronics Group, LLC
 beagle	BeagleBoard.org Foundation
 bhf	Beckhoff Automation GmbH & Co. KG
 bitmain	Bitmain Technologies
+blues	Blues Wireless
 blutek	BluTek Power
 boe	BOE Technology Group Co., Ltd.
 bosch	Bosch Sensortec GmbH
@@ -218,6 +219,7 @@ gaisler	Gaisler
 gardena	GARDENA GmbH
 gateworks	Gateworks Corporation
 gcw	Game Consoles Worldwide
+gd	GigaDevice Semiconductor
 ge	General Electric Company
 geekbuying	GeekBuying
 gef	GE Fanuc Intelligent Platforms Embedded Systems, Inc.
@@ -257,6 +259,7 @@ hugsun	Shenzhen Hugsun Technology Co. Ltd.
 hwacom	HwaCom Systems Inc.
 hycon	Hycon Technology Corp.
 hydis	Hydis Technologies
+hynitron	Hynitron
 hyundai	Hyundai Technology
 i2se	I2SE GmbH
 ibm	International Business Machines (IBM)
@@ -411,6 +414,7 @@ nokia	Nokia
 nordic	Nordic Semiconductor
 novtech	NovTech, Inc.
 nutsboard	NutsBoard
+nuclei	Nuclei System Technology
 nuvoton	Nuvoton Technology Corporation
 nvd	New Vision Display
 nvidia	NVIDIA
@@ -478,6 +482,7 @@ qi	Qi Hardware
 qihua	Chengdu Kaixuan Information Technology Co., Ltd.
 qiaodian	QiaoDian XianShi Corporation
 qnap	QNAP Systems, Inc.
+qorvo	Qorvo, Inc.
 quectel	Quectel Wireless Solutions Co., Ltd.
 quicklogic	QuickLogic Corp.
 radxa	Radxa
@@ -511,6 +516,7 @@ sancloud	Sancloud Ltd
 sandisk	Sandisk Corporation
 satoz	Satoz International Co., Ltd
 sbs	Smart Battery System
+sc	Space Cubics, LLC
 schindler	Schindler
 seagate	Seagate Technology PLC
 segger	SEGGER Microcontroller GmbH
@@ -539,6 +545,7 @@ silex-insight	Silex Insight
 siliconfile	Siliconfile Technologies lnc.
 siliconmitus	Silicon Mitus, Inc.
 siemens	Siemens AG
+simcom	SIMCom Wireless Solutions Co., LTD
 simtek	Cypress Semiconductor Corporation (Simtek Corporation)
 sinlinx	Sinlinx Electronics Technology Co., LTD
 sinovoip	SinoVoip Co., Ltd
@@ -647,6 +654,7 @@ wexler	Wexler
 whwave	Shenzhen whwave Electronics, Inc.
 wi2wi	Wi2Wi, Inc.
 winbond	Winbond Electronics corp.
+winsen	Zhengzhou Winsen Electronics Technology Co., Ltd.
 winstar	Winstar Display Corp.
 wits	Shenzhen Merrii Technology Co., Ltd. (WITS)
 wiznet	WIZnet Co., Ltd.
@@ -657,6 +665,7 @@ wobo	Wobo
 wolfson	Cirrus Logic, Inc. (formerly Wolfson Microelectronics plc)
 worldsemi	Worldsemi Co., Limited
 x-powers	X-Powers
+xen	Xen Hypervisor
 xes	Extreme Engineering Solutions (X-ES)
 xiaomi	Xiaomi Technology Co., Ltd.
 xillybus	Xillybus Ltd.

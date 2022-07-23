@@ -31,7 +31,7 @@ import argparse
 import os
 import struct
 import pickle
-from distutils.version import LooseVersion
+from packaging import version
 
 import elftools
 from elftools.elf.elffile import ELFFile
@@ -39,11 +39,11 @@ from elftools.elf.sections import SymbolTableSection
 import elftools.elf.enums
 
 # This is needed to load edt.pickle files.
-sys.path.append(os.path.join(os.path.dirname(__file__),
-                             'dts', 'python-devicetree', 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__),
+                                'dts', 'python-devicetree', 'src'))
 from devicetree import edtlib  # pylint: disable=unused-import
 
-if LooseVersion(elftools.__version__) < LooseVersion('0.24'):
+if version.parse(elftools.__version__) < version.parse('0.24'):
     sys.exit("pyelftools is out of date, need version 0.24 or later")
 
 scr = os.path.basename(sys.argv[0])
@@ -62,6 +62,8 @@ def parse_args():
 
     parser.add_argument("-k", "--kernel", required=True,
                         help="Input zephyr ELF binary")
+    parser.add_argument("-d", "--num-dynamic-devices", required=False, default=0,
+                        type=int, help="Input number of dynamic devices allowed")
     parser.add_argument("-o", "--output-source", required=True,
             help="Output source file")
 
@@ -112,6 +114,7 @@ def symbol_handle_data(elf, sym):
 # These match the corresponding constants in <device.h>
 DEVICE_HANDLE_SEP = -32768
 DEVICE_HANDLE_ENDS = 32767
+DEVICE_HANDLE_NULL = 0
 def handle_name(hdl):
     if hdl == DEVICE_HANDLE_SEP:
         return "DEVICE_HANDLE_SEP"
@@ -134,6 +137,7 @@ class Device:
         # assigned by correlating the device struct handles pointer
         # value with the addr of a Handles instance.
         self.__handles = None
+        self.__pm = None
 
     @property
     def obj_handles(self):
@@ -153,6 +157,55 @@ class Device:
             offset = self.ld_constants["_DEVICE_STRUCT_HANDLES_OFFSET"]
             self.__handles = struct.unpack(format, data[offset:offset + size])[0]
         return self.__handles
+
+    @property
+    def obj_pm(self):
+        """
+        Returns the value from the device struct pm field, pointing to the
+        pm struct for this device.
+        """
+        if self.__pm is None:
+            data = symbol_data(self.elf, self.sym)
+            format = "<" if self.elf.little_endian else ">"
+            if self.elf.elfclass == 32:
+                format += "I"
+                size = 4
+            else:
+                format += "Q"
+                size = 8
+            offset = self.ld_constants["_DEVICE_STRUCT_PM_OFFSET"]
+            self.__pm = struct.unpack(format, data[offset:offset + size])[0]
+        return self.__pm
+
+class PMDevice:
+    """
+    Represents information about a pm_device object and its references to other objects.
+    """
+    def __init__(self, elf, ld_constants, sym, addr):
+        self.elf = elf
+        self.ld_constants = ld_constants
+        self.sym = sym
+        self.addr = addr
+
+        # Point to the device instance associated with the pm_device;
+        self.__flags = None
+
+    def is_domain(self):
+        """
+        Checks if the device that this pm struct belongs is a power domain.
+        """
+        if self.__flags is None:
+            data = symbol_data(self.elf, self.sym)
+            format = "<" if self.elf.little_endian else ">"
+            if self.elf.elfclass == 32:
+                format += "I"
+                size = 4
+            else:
+                format += "Q"
+                size = 8
+            offset = self.ld_constants["_PM_DEVICE_STRUCT_FLAGS_OFFSET"]
+            self.__flags = struct.unpack(format, data[offset:offset + size])[0]
+        return self.__flags & (1 << self.ld_constants["_PM_DEVICE_FLAG_PD"])
 
 class Handles:
     def __init__(self, sym, addr, handles, node):
@@ -174,6 +227,7 @@ def main():
     with open(edtser, 'rb') as f:
         edt = pickle.load(f)
 
+    pm_devices = {}
     devices = []
     handles = []
     # Leading _ are stripped from the stored constant key
@@ -181,6 +235,10 @@ def main():
     want_constants = set([args.start_symbol,
                           "_DEVICE_STRUCT_SIZEOF",
                           "_DEVICE_STRUCT_HANDLES_OFFSET"])
+    if args.num_dynamic_devices != 0:
+        want_constants.update(["_PM_DEVICE_FLAG_PD",
+                               "_DEVICE_STRUCT_PM_OFFSET",
+                               "_PM_DEVICE_STRUCT_FLAGS_OFFSET"])
     ld_constants = dict()
 
     for section in elf.iter_sections():
@@ -205,6 +263,10 @@ def main():
                         node = edt.dep_ord2node[hdls[0]] if (hdls and hdls[0] != 0) else None
                         handles.append(Handles(sym, addr, hdls, node))
                         debug("handles %s %d %s" % (sym.name, hdls[0] if hdls else -1, node))
+                if sym.name.startswith("__pm_device__") and not sym.name.endswith("_slot"):
+                    addr = sym.entry.st_value
+                    pm_devices[addr] = PMDevice(elf, ld_constants, sym, addr)
+                    debug("pm device %s" % (sym.name,))
 
     assert len(want_constants) == len(ld_constants), "linker map data incomplete"
 
@@ -245,14 +307,18 @@ def main():
         hv = handle.handles
         hvi = 1
         handle.dev_deps = []
-        handle.ext_deps = []
-        deps = handle.dev_deps
+        handle.dev_injected = []
+        handle.dev_sups = []
+        hdls = handle.dev_deps
         while hvi < len(hv):
             h = hv[hvi]
             if h == DEVICE_HANDLE_ENDS:
                 break
             if h == DEVICE_HANDLE_SEP:
-                deps = handle.ext_deps
+                if hdls == handle.dev_deps:
+                    hdls = handle.dev_injected
+                else:
+                    hdls = handle.dev_sups
             else:
                 deps.append(h)
                 n = edt
@@ -264,32 +330,47 @@ def main():
     root = edt.dep_ord2node[0]
     assert root not in used_nodes
 
-    for sn in used_nodes:
+    for n in used_nodes:
         # Where we're storing the final set of nodes: these are all used
-        sn.__depends = set()
+        n.__depends = set()
+        n.__supports = set()
 
-        deps = set(sn.depends_on)
-        debug("\nNode: %s\nOrig deps:\n\t%s" % (sn.path, "\n\t".join([dn.path for dn in deps])))
+        deps = set(n.depends_on)
+        debug("\nNode: %s\nOrig deps:\n\t%s" % (n.path, "\n\t".join([dn.path for dn in deps])))
         while len(deps) > 0:
             dn = deps.pop()
             if dn in used_nodes:
                 # this is used
-                sn.__depends.add(dn)
+                n.__depends.add(dn)
             elif dn != root:
                 # forward the dependency up one level
                 for ddn in dn.depends_on:
                     deps.add(ddn)
-        debug("final deps:\n\t%s\n" % ("\n\t".join([ _dn.path for _dn in sn.__depends])))
+        debug("Final deps:\n\t%s\n" % ("\n\t".join([ _dn.path for _dn in n.__depends])))
+
+        sups = set(n.required_by)
+        debug("\nOrig sups:\n\t%s" % ("\n\t".join([dn.path for dn in sups])))
+        while len(sups) > 0:
+            sn = sups.pop()
+            if sn in used_nodes:
+                # this is used
+                n.__supports.add(sn)
+            else:
+                # forward the support down one level
+                for ssn in sn.required_by:
+                    sups.add(ssn)
+        debug("\nFinal sups:\n\t%s" % ("\n\t".join([_sn.path for _sn in n.__supports])))
 
     with open(args.output_source, "w") as fp:
-        fp.write('#include <device.h>\n')
-        fp.write('#include <toolchain.h>\n')
+        fp.write('#include <zephyr/device.h>\n')
+        fp.write('#include <zephyr/toolchain.h>\n')
 
         for dev in devices:
             hs = dev.handle
             assert hs, "no hs for %s" % (dev.sym.name,)
             dep_paths = []
-            ext_paths = []
+            inj_paths = []
+            sup_paths = []
             hdls = []
 
             sn = hs.node
@@ -300,27 +381,33 @@ def main():
                         dep_paths.append(dn.path)
                     else:
                         dep_paths.append('(%s)' % dn.path)
-            if len(hs.ext_deps) > 0:
-                # TODO: map these to something smaller?
-                ext_paths.extend(map(str, hs.ext_deps))
-                hdls.append(DEVICE_HANDLE_SEP)
-                hdls.extend(hs.ext_deps)
+            # Force separator to signal start of injected dependencies
+            hdls.append(DEVICE_HANDLE_SEP)
+            for inj in hs.dev_injected:
+                if inj not in edt.dep_ord2node:
+                    continue
+                expected = edt.dep_ord2node[inj]
+                if expected in used_nodes:
+                    inj_paths.append(expected.path)
+                    hdls.append(expected.__device.dev_handle)
 
-            # When CONFIG_USERSPACE is enabled the pre-built elf is
-            # also used to get hashes that identify kernel objects by
-            # address. We can't allow the size of any object in the
-            # final elf to change. We also must make sure at least one
-            # DEVICE_HANDLE_ENDS is inserted.
-            padding = len(hs.handles) - len(hdls)
-            assert padding > 0, \
-                (f"device {dev.sym.name}: "
-                 "linker pass 1 left no room to insert DEVICE_HANDLE_ENDS. "
-                 "To work around, increase CONFIG_DEVICE_HANDLE_PADDING by " +
-                 str(1 + (-padding)))
-            while padding > 0:
-                hdls.append(DEVICE_HANDLE_ENDS)
-                padding -= 1
-            assert len(hdls) == len(hs.handles), "%s handle overflow" % (dev.sym.name,)
+            # Force separator to signal start of supported devices
+            hdls.append(DEVICE_HANDLE_SEP)
+            if len(hs.dev_sups) > 0:
+                for dn in sn.required_by:
+                    if dn in sn.__supports:
+                        sup_paths.append(dn.path)
+                    else:
+                        sup_paths.append('(%s)' % dn.path)
+                hdls.extend(dn.__device.dev_handle for dn in sn.__supports)
+
+            if args.num_dynamic_devices != 0:
+                pm = pm_devices.get(dev.obj_pm)
+                if pm and pm.is_domain():
+                    hdls.extend(DEVICE_HANDLE_NULL for dn in range(args.num_dynamic_devices))
+
+            # Terminate the array with the end symbol
+            hdls.append(DEVICE_HANDLE_ENDS)
 
             lines = [
                 '',
@@ -328,9 +415,14 @@ def main():
             ]
 
             if len(dep_paths) > 0:
-                lines.append(' * - %s' % ('\n * - '.join(dep_paths)))
-            if len(ext_paths) > 0:
-                lines.append(' * + %s' % ('\n * + '.join(ext_paths)))
+                lines.append(' * Direct Dependencies:')
+                lines.append(' *   - %s' % ('\n *   - '.join(dep_paths)))
+            if len(inj_paths) > 0:
+                lines.append(' * Injected Dependencies:')
+                lines.append(' *   - %s' % ('\n *   - '.join(inj_paths)))
+            if len(sup_paths) > 0:
+                lines.append(' * Supported:')
+                lines.append(' *   - %s' % ('\n *   - '.join(sup_paths)))
 
             lines.extend([
                 ' */',

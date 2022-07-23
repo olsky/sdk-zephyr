@@ -9,12 +9,12 @@
  * @brief Internal functions to handle transport over TLS socket.
  */
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(net_mqtt_sock_tls, CONFIG_MQTT_LOG_LEVEL);
 
 #include <errno.h>
-#include <net/socket.h>
-#include <net/mqtt.h>
+#include <zephyr/net/socket.h>
+#include <zephyr/net/mqtt.h>
 
 #include "mqtt_os.h"
 
@@ -22,15 +22,20 @@ int mqtt_client_tls_connect(struct mqtt_client *client)
 {
 	const struct sockaddr *broker = client->broker;
 	struct mqtt_sec_config *tls_config = &client->transport.tls.config;
+	int type = SOCK_STREAM;
 	int ret;
 
+	if (tls_config->set_native_tls) {
+		type |= SOCK_NATIVE_TLS;
+	}
+
 	client->transport.tls.sock = zsock_socket(broker->sa_family,
-						  SOCK_STREAM, IPPROTO_TLS_1_2);
+						  type, IPPROTO_TLS_1_2);
 	if (client->transport.tls.sock < 0) {
 		return -errno;
 	}
 
-	MQTT_TRC("Created socket %d", client->transport.tls.sock);
+	NET_DBG("Created socket %d", client->transport.tls.sock);
 
 #if defined(CONFIG_SOCKS)
 	if (client->transport.proxy.addrlen != 0) {
@@ -39,7 +44,7 @@ int mqtt_client_tls_connect(struct mqtt_client *client)
 				 &client->transport.proxy.addr,
 				 client->transport.proxy.addrlen);
 		if (ret < 0) {
-			return -errno;
+			goto error;
 		}
 	}
 #endif
@@ -88,6 +93,15 @@ int mqtt_client_tls_connect(struct mqtt_client *client)
 		}
 	}
 
+	if (tls_config->cert_nocopy != TLS_CERT_NOCOPY_NONE) {
+		ret = zsock_setsockopt(client->transport.tls.sock, SOL_TLS,
+				       TLS_CERT_NOCOPY, &tls_config->cert_nocopy,
+				       sizeof(tls_config->cert_nocopy));
+		if (ret < 0) {
+			goto error;
+		}
+	}
+
 	size_t peer_addr_size = sizeof(struct sockaddr_in6);
 
 	if (broker->sa_family == AF_INET) {
@@ -100,7 +114,7 @@ int mqtt_client_tls_connect(struct mqtt_client *client)
 		goto error;
 	}
 
-	MQTT_TRC("Connect completed");
+	NET_DBG("Connect completed");
 	return 0;
 
 error:
@@ -188,7 +202,7 @@ int mqtt_client_tls_disconnect(struct mqtt_client *client)
 {
 	int ret;
 
-	MQTT_TRC("Closing socket %d", client->transport.tls.sock);
+	NET_INFO("Closing socket %d", client->transport.tls.sock);
 	ret = zsock_close(client->transport.tls.sock);
 	if (ret < 0) {
 		return -errno;

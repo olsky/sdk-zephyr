@@ -1,4 +1,4 @@
-name: Compliance
+name: Compliance Checks
 
 on: pull_request
 
@@ -12,14 +12,16 @@ jobs:
       with:
         ref: ${{ github.event.pull_request.head.sha }}
         fetch-depth: 0
+        path: ./zephyr
     - name: Run Maintainers Script
+      working-directory: ./zephyr
       id: maintainer
       env:
         BASE_REF: ${{ github.base_ref }}
       run: |
         python3 ./scripts/get_maintainer.py path CMakeLists.txt
 
-  compliance_job:
+  check_compliance:
     runs-on: ubuntu-latest
     name: Run compliance checks on patch series (PR)
     steps:
@@ -32,6 +34,7 @@ jobs:
       with:
         ref: ${{ github.event.pull_request.head.sha }}
         fetch-depth: 0
+        path: ./zephyr
 
     - name: cache-pip
       uses: actions/cache@v1
@@ -47,6 +50,7 @@ jobs:
         pip3 install west
 
     - name: west setup
+      working-directory: ./zephyr
       env:
         BASE_REF: ${{ github.base_ref }}
       run: |
@@ -54,14 +58,15 @@ jobs:
         git config --global user.name "Your Name"
         git remote -v
         # Sauce tag checks before rebasing
-        git log --oneline --first-parent origin/${BASE_REF}..HEAD | grep -E -v "\[nrf (mergeup|fromtree|fromlist|noup)\]" && { echo 'Sauce tag missing'; exit 1; }
+        git log --oneline --first-parent origin/${BASE_REF}..HEAD | grep -E -v "\[nrf (mergeup|fromtree|fromlist|noup)\][ ]" && { echo 'Sauce tag missing or invalid, format is "[nrf <sauce-tag>] <shortlog>"'; exit 1; }
         git rebase origin/${BASE_REF}
         # debug
         git log  --pretty=oneline | head -n 10
         west init -l . || true
-        west update
+        west update 2>&1 1> west.update.log || west update 2>&1 1> west.update2.log
 
     - name: Run Compliance Tests
+      working-directory: ./zephyr
       continue-on-error: true
       id: compliance
       env:
@@ -71,22 +76,23 @@ jobs:
         # debug
         ls -la
         git log  --pretty=oneline | head -n 10
-        ./scripts/ci/check_compliance.py -m Codeowners -m Devicetree -m Gitlint -m Identity -m Nits -m pylint -m checkpatch -m KconfigBasic -c origin/${BASE_REF}..
+        ./scripts/ci/check_compliance.py -m Devicetree -m Gitlint -m Identity -m Nits -m pylint -m checkpatch -m KconfigBasic -c origin/${BASE_REF}..
 
     - name: upload-results
       uses: actions/upload-artifact@master
       continue-on-error: True
       with:
         name: compliance.xml
-        path: compliance.xml
+        path: zephyr/compliance.xml
 
     - name: check-warns
+      working-directory: ./zephyr
       run: |
         if [[ ! -s "compliance.xml" ]]; then
           exit 1;
         fi
 
-        for file in Nits.txt checkpatch.txt Identity.txt Gitlint.txt pylint.txt Devicetree.txt Kconfig.txt Codeowners.txt; do
+        for file in Nits.txt checkpatch.txt Identity.txt Gitlint.txt pylint.txt Devicetree.txt Kconfig.txt; do
           if [[ -s $file ]]; then
             errors=$(cat $file)
             errors="${errors//'%'/'%25'}"
@@ -97,6 +103,6 @@ jobs:
           fi
         done
 
-        if [ ${exit} == 1 ]; then
+        if [ "${exit}" == "1" ]; then
           exit 1;
         fi

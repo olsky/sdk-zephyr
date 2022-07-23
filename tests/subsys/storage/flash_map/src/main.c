@@ -7,8 +7,8 @@
  */
 
 #include <ztest.h>
-#include <drivers/flash.h>
-#include <storage/flash_map.h>
+#include <zephyr/drivers/flash.h>
+#include <zephyr/storage/flash_map.h>
 
 extern int flash_map_entries;
 struct flash_sector fs_sectors[256];
@@ -32,8 +32,10 @@ void test_flash_area_get_sectors(void)
 	zassert_true(rc == 0, "flash_area_open() fail");
 
 	/* First erase the area so it's ready for use. */
-	flash_dev =
-		device_get_binding(DT_CHOSEN_ZEPHYR_FLASH_CONTROLLER_LABEL);
+	flash_dev = flash_area_get_device(fa);
+
+	/* Device obtained by label should match the one from fa object */
+	zassert_equal(flash_dev, flash_dev_a, "Device for image_1 do not match");
 
 	/* Device obtained by label should match the one from fa object */
 	zassert_equal(flash_dev, flash_dev_a, "Device for image_1 do not match");

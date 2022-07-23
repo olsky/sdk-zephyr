@@ -1,16 +1,17 @@
 /*
- * Copyright (c) 2016-2017 Nordic Semiconductor ASA
+ * Copyright (c) 2016-2021 Nordic Semiconductor ASA
  * Copyright (c) 2018 Intel Corporation
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <zephyr/device.h>
 #include <soc.h>
-#include <drivers/clock_control.h>
-#include <drivers/clock_control/nrf_clock_control.h>
-#include <drivers/timer/system_timer.h>
-#include <drivers/timer/nrf_rtc_timer.h>
-#include <sys_clock.h>
+#include <zephyr/drivers/clock_control.h>
+#include <zephyr/drivers/clock_control/nrf_clock_control.h>
+#include <zephyr/drivers/timer/system_timer.h>
+#include <zephyr/drivers/timer/nrf_rtc_timer.h>
+#include <zephyr/sys_clock.h>
 #include <hal/nrf_rtc.h>
 
 #define EXT_CHAN_COUNT CONFIG_NRF_RTC_TIMER_USER_CHAN_COUNT
@@ -97,7 +98,7 @@ static uint32_t full_int_lock(void)
 {
 	uint32_t mcu_critical_state;
 
-	if (IS_ENABLED(CONFIG_ZERO_LATENCY_IRQS)) {
+	if (IS_ENABLED(CONFIG_NRF_RTC_TIMER_LOCK_ZERO_LATENCY_IRQS)) {
 		mcu_critical_state = __get_PRIMASK();
 		__disable_irq();
 	} else {
@@ -109,7 +110,7 @@ static uint32_t full_int_lock(void)
 
 static void full_int_unlock(uint32_t mcu_critical_state)
 {
-	if (IS_ENABLED(CONFIG_ZERO_LATENCY_IRQS)) {
+	if (IS_ENABLED(CONFIG_NRF_RTC_TIMER_LOCK_ZERO_LATENCY_IRQS)) {
 		__set_PRIMASK(mcu_critical_state);
 	} else {
 		irq_unlock(mcu_critical_state);
@@ -120,6 +121,23 @@ uint32_t z_nrf_rtc_timer_compare_evt_address_get(int32_t chan)
 {
 	__ASSERT_NO_MSG(chan < CHAN_COUNT);
 	return nrf_rtc_event_address_get(RTC, nrf_rtc_compare_event_get(chan));
+}
+
+uint32_t z_nrf_rtc_timer_capture_task_address_get(int32_t chan)
+{
+#if defined(RTC_TASKS_CAPTURE_TASKS_CAPTURE_Msk)
+	__ASSERT_NO_MSG(chan < CHAN_COUNT);
+	if (chan == 0) {
+		return 0;
+	}
+
+	nrf_rtc_task_t task = offsetof(NRF_RTC_Type, TASKS_CAPTURE[chan]);
+
+	return nrf_rtc_task_address_get(RTC, task);
+#else
+	ARG_UNUSED(chan);
+	return 0;
+#endif
 }
 
 static bool compare_int_lock(int32_t chan)
@@ -248,7 +266,7 @@ static uint32_t set_absolute_alarm(int32_t chan, uint32_t abs_val)
 		/* Rerun the algorithm if counter progressed during execution
 		 * and cc_val is in the past or one tick from now. In such
 		 * scenario, it is possible that event will not be generated.
-		 * Reruning the algorithm will delay the alarm but ensure that
+		 * Rerunning the algorithm will delay the alarm but ensure that
 		 * event will be generated at the moment indicated by value in
 		 * CC register.
 		 */
@@ -522,50 +540,6 @@ void z_nrf_rtc_timer_chan_free(int32_t chan)
 	atomic_or(&alloc_mask, BIT(chan));
 }
 
-int sys_clock_driver_init(const struct device *dev)
-{
-	ARG_UNUSED(dev);
-	static const enum nrf_lfclk_start_mode mode =
-		IS_ENABLED(CONFIG_SYSTEM_CLOCK_NO_WAIT) ?
-			CLOCK_CONTROL_NRF_LF_START_NOWAIT :
-			(IS_ENABLED(CONFIG_SYSTEM_CLOCK_WAIT_FOR_AVAILABILITY) ?
-			CLOCK_CONTROL_NRF_LF_START_AVAILABLE :
-			CLOCK_CONTROL_NRF_LF_START_STABLE);
-
-	/* TODO: replace with counter driver to access RTC */
-	nrf_rtc_prescaler_set(RTC, 0);
-	for (int32_t chan = 0; chan < CHAN_COUNT; chan++) {
-		cc_data[chan].target_time = TARGET_TIME_INVALID;
-		nrf_rtc_int_enable(RTC, RTC_CHANNEL_INT_MASK(chan));
-	}
-
-	nrf_rtc_int_enable(RTC, NRF_RTC_INT_OVERFLOW_MASK);
-
-	NVIC_ClearPendingIRQ(RTC_IRQn);
-
-	IRQ_CONNECT(RTC_IRQn, DT_IRQ(DT_NODELABEL(RTC_LABEL), priority),
-		    rtc_nrf_isr, 0, 0);
-	irq_enable(RTC_IRQn);
-
-	nrf_rtc_int_enable(RTC, NRF_RTC_INT_OVERFLOW_MASK);
-	nrf_rtc_task_trigger(RTC, NRF_RTC_TASK_CLEAR);
-	nrf_rtc_task_trigger(RTC, NRF_RTC_TASK_START);
-
-	int_mask = BIT_MASK(CHAN_COUNT);
-	if (CONFIG_NRF_RTC_TIMER_USER_CHAN_COUNT) {
-		alloc_mask = BIT_MASK(EXT_CHAN_COUNT) << 1;
-	}
-
-	uint32_t initial_timeout = IS_ENABLED(CONFIG_TICKLESS_KERNEL) ?
-				(COUNTER_HALF_SPAN - 1) :
-				(counter() + CYC_PER_TICK);
-
-	compare_set(0, initial_timeout, sys_clock_timeout_handler, NULL);
-
-	z_nrf_clock_control_lf_on(mode);
-
-	return 0;
-}
 
 void sys_clock_set_timeout(int32_t ticks, bool idle)
 {
@@ -622,3 +596,50 @@ uint32_t sys_clock_cycle_get_32(void)
 {
 	return (uint32_t)z_nrf_rtc_timer_read();
 }
+
+static int sys_clock_driver_init(const struct device *dev)
+{
+	ARG_UNUSED(dev);
+	static const enum nrf_lfclk_start_mode mode =
+		IS_ENABLED(CONFIG_SYSTEM_CLOCK_NO_WAIT) ?
+			CLOCK_CONTROL_NRF_LF_START_NOWAIT :
+			(IS_ENABLED(CONFIG_SYSTEM_CLOCK_WAIT_FOR_AVAILABILITY) ?
+			CLOCK_CONTROL_NRF_LF_START_AVAILABLE :
+			CLOCK_CONTROL_NRF_LF_START_STABLE);
+
+	/* TODO: replace with counter driver to access RTC */
+	nrf_rtc_prescaler_set(RTC, 0);
+	for (int32_t chan = 0; chan < CHAN_COUNT; chan++) {
+		cc_data[chan].target_time = TARGET_TIME_INVALID;
+		nrf_rtc_int_enable(RTC, RTC_CHANNEL_INT_MASK(chan));
+	}
+
+	nrf_rtc_int_enable(RTC, NRF_RTC_INT_OVERFLOW_MASK);
+
+	NVIC_ClearPendingIRQ(RTC_IRQn);
+
+	IRQ_CONNECT(RTC_IRQn, DT_IRQ(DT_NODELABEL(RTC_LABEL), priority),
+		    rtc_nrf_isr, 0, 0);
+	irq_enable(RTC_IRQn);
+
+	nrf_rtc_task_trigger(RTC, NRF_RTC_TASK_CLEAR);
+	nrf_rtc_task_trigger(RTC, NRF_RTC_TASK_START);
+
+	int_mask = BIT_MASK(CHAN_COUNT);
+	if (CONFIG_NRF_RTC_TIMER_USER_CHAN_COUNT) {
+		alloc_mask = BIT_MASK(EXT_CHAN_COUNT) << 1;
+	}
+
+	uint32_t initial_timeout = IS_ENABLED(CONFIG_TICKLESS_KERNEL) ?
+		(COUNTER_HALF_SPAN - 1) :
+		(counter() + CYC_PER_TICK);
+
+	compare_set(0, initial_timeout, sys_clock_timeout_handler, NULL);
+
+	z_nrf_clock_control_lf_on(mode);
+
+	return 0;
+}
+
+SYS_INIT(sys_clock_driver_init, PRE_KERNEL_2,
+	 CONFIG_SYSTEM_CLOCK_INIT_PRIORITY);

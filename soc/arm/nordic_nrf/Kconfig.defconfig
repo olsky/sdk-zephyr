@@ -22,13 +22,14 @@ config SYS_CLOCK_HW_CYCLES_PER_SEC
 	default 32768
 
 config SYS_CLOCK_TICKS_PER_SEC
+	default 128 if !TICKLESS_KERNEL
 	default 32768
 
 config ARCH_HAS_CUSTOM_BUSY_WAIT
 	default y
 
 config PM
-	default y if SYS_CLOCK_EXISTS && !HAS_NO_SYS_PM && MULTITHREADING
+	default y if SYS_CLOCK_EXISTS && !HAS_NO_PM && MULTITHREADING
 
 config BUILD_OUTPUT_HEX
 	default y
@@ -41,13 +42,5 @@ endif
 config GPIO
 	default y
 	depends on SPI
-
-# Switch the default mechanism for null-pointer dereference detection from
-# DWT-based to MPU-based, except for the network core on nRF5340 where the
-# MPU-based mechanism cannot be used.
-choice NULL_POINTER_EXCEPTION_DETECTION
-	default NULL_POINTER_EXCEPTION_DETECTION_DWT if SOC_NRF5340_CPUNET
-	default NULL_POINTER_EXCEPTION_DETECTION_MPU if TEST_ARM_CORTEX_M && !ARM_NONSECURE_FIRMWARE
-endchoice
 
 endif # SOC_FAMILY_NRF
